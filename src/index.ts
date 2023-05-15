@@ -154,21 +154,21 @@ async function check(): Promise<AdminInfo[]> {
 
   const to_delete: AdminInfo[] = [];
   for (const server of servers_info) {
-    const admins_array = await sql<AdminInfo>("admins").select();
-    const admins = admins_array.filter((adm) => {
+    const admins = (await sql<AdminInfo>("admins").select()).filter((adm) => {
       return adm.server === server.name;
     });
 
     for (const admin of admins) {
       if (
         !server.admins.find((adm) => {
-          return (
-            adm.id === admin.id &&
-            adm.server === admin.server &&
-            !admin.alerted_to_delete
-          );
-        })
+          return adm.id === admin.id && adm.server === admin.server;
+        }) &&
+        admin.alerted_to_delete === false
       ) {
+        await sql<AdminInfo>("admins")
+          .update({ alerted_to_delete: true })
+          .where({ id: admin.id, server: admin.server });
+
         to_delete.push(admin);
         continue;
       } else continue;
@@ -179,12 +179,6 @@ async function check(): Promise<AdminInfo[]> {
     const admins = to_delete
       .map((adm) => `› [${adm.server}] ${adm.nick} - ${adm.id}`)
       .join("\n");
-
-    for (const admin of to_delete) {
-      await sql<AdminInfo>("admins")
-        .update({ alerted_to_delete: true })
-        .where({ id: admin.id, server: admin.server });
-    }
 
     await postWebhook("Необходимо удаление из таблицы!", admins);
   }
