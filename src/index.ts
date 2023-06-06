@@ -154,24 +154,26 @@ async function check(): Promise<AdminInfo[]> {
 
   const to_delete: AdminInfo[] = [];
   for (const server of servers_info) {
-    const admins = (await sql<AdminInfo>("admins").select()).filter((adm) => {
+    const array = await sql<AdminInfo>("admins").select();
+    const admins = array.filter((adm) => {
       return adm.server === server.name;
     });
 
-    for (const admin of admins) {
-      if (
-        !server.admins.find((adm) => {
-          return adm.id === admin.id && adm.server === admin.server;
-        }) &&
-        admin.alerted_to_delete === false
-      ) {
+    for (const data of admins) {
+      const admin = server.admins.find((adm) => {
+        return adm.id === data.id && adm.server === data.server;
+      });
+
+      if (!admin && !data.alerted_to_delete) {
         await sql<AdminInfo>("admins")
           .update({ alerted_to_delete: true })
-          .where({ id: admin.id, server: admin.server });
+          .where({ id: data.id, server: data.server });
 
-        to_delete.push(admin);
+        to_delete.push(data);
         continue;
-      } else continue;
+      } else {
+        continue;
+      }
     }
   }
 
@@ -195,20 +197,18 @@ async function check(): Promise<AdminInfo[]> {
         to_push.push(admin);
 
         continue;
-      } else if (data.length && !data[0].pushed && !data[0].alerted_to_delete) {
-        to_push.push(admin);
-        await sql<AdminInfo>("admins")
-          .update({ alerted_to_delete: true })
-          .where({ id: data[0].id, server: data[0].server });
-
-        continue;
-      } else if (
-        data[0].pushed === true ||
-        data[0].alerted_to_delete === true
-      ) {
+      } else if (data.length || data[0].pushed || data[0].alerted_to_delete) {
         continue;
       }
     }
+  }
+
+  if (to_push.length) {
+    const admins = to_push
+      .map((adm) => `› [${adm.server}] ${adm.nick} - ${adm.id}`)
+      .join("\n");
+
+    await postWebhook("В таблицу добавлены новые админы!", admins);
   }
 
   return to_push;
