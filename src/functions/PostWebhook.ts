@@ -6,7 +6,11 @@ const client = new WebhookClient({
   url: process.env.WEBHOOK_URL,
 });
 
-export default async function postWebhook(action: string, message: string) {
+export default async function postWebhook(
+  action: string,
+  message: string,
+  mention: boolean = true
+) {
   const embed = new EmbedBuilder();
   embed.setColor("DarkPurple");
   embed.setTitle(action);
@@ -19,7 +23,7 @@ export default async function postWebhook(action: string, message: string) {
   }
 
   return client.send({
-    content: mentions.join(" "),
+    content: mention ? mentions.join(" ") : undefined,
     embeds: [embed],
   });
 }

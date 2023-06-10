@@ -13,6 +13,7 @@ import _sql from "./functions/SQL";
 import { GoogleSpreadsheet, GoogleSpreadsheetWorksheet } from "google-spreadsheet"; // prettier-ignore
 import { readFileSync } from "node:fs";
 import { Sheets } from "google-sheets-api";
+import { handleDelete, handlePush } from "./functions/Admins";
 
 var count = 0;
 
@@ -48,8 +49,10 @@ var sheet: GoogleSpreadsheetWorksheet;
 
   const admins = await check();
   if (!admins.length) console.log("– No new admins!");
-  else await push(admins);
-
+  else {
+    console.log(`# There's ${admins.length} new admin(s)!`);
+    await push(admins);
+  }
   // #endregion
 
   console.log("[#] Starting job.");
@@ -58,7 +61,10 @@ var sheet: GoogleSpreadsheetWorksheet;
     async () => {
       const admins = await check();
       if (!admins.length) console.log("–  No new admins!");
-      else await push(admins);
+      else {
+        console.log(`# There's ${admins.length} new admin(s)!`);
+        await push(admins);
+      }
     },
     null,
     false,
@@ -135,15 +141,31 @@ async function check(): Promise<AdminInfo[]> {
         server: server_names[server_name],
       });
 
-      server_admins[server_names[server_name]].push({
+      const toAdd: AdminInfo = {
         server: server_names[server_name],
         nick: admin_name,
         profile: admin_id,
         id: steam_id,
 
-        pushed: data.length ? data[0].pushed : false,
-        alerted_to_delete: data.length ? data[0].alerted_to_delete : false,
-      });
+        pushed: undefined,
+        alerted_to_delete: undefined,
+      };
+
+      if (data.length && data[0].alerted_to_delete) {
+        await sql<AdminInfo>("admins")
+          .delete()
+          .where({ id: data[0].id, server: data[0].server });
+
+        continue;
+      } else if (data.length) {
+        toAdd["pushed"] = data[0].pushed;
+        toAdd["alerted_to_delete"] = data[0].alerted_to_delete;
+      } else if (!data.length) {
+        toAdd["pushed"] = false;
+        toAdd["alerted_to_delete"] = false;
+      }
+
+      server_admins[server_names[server_name]].push(toAdd);
     }
 
     servers_info.push({
@@ -154,27 +176,7 @@ async function check(): Promise<AdminInfo[]> {
 
   const to_delete: AdminInfo[] = [];
   for (const server of servers_info) {
-    const array = await sql<AdminInfo>("admins").select();
-    const admins = array.filter((adm) => {
-      return adm.server === server.name;
-    });
-
-    for (const data of admins) {
-      const admin = server.admins.find((adm) => {
-        return adm.id === data.id && adm.server === data.server;
-      });
-
-      if (!admin && !data.alerted_to_delete) {
-        await sql<AdminInfo>("admins")
-          .update({ alerted_to_delete: true })
-          .where({ id: data.id, server: data.server });
-
-        to_delete.push(data);
-        continue;
-      } else {
-        continue;
-      }
-    }
+    to_delete.push(...(await handleDelete(sql, server)));
   }
 
   if (to_delete.length) {
@@ -187,20 +189,7 @@ async function check(): Promise<AdminInfo[]> {
 
   const to_push: AdminInfo[] = [];
   for (const { admins } of servers_info) {
-    for (const admin of admins) {
-      const data = await sql<AdminInfo>("admins")
-        .select()
-        .where({ id: admin.id, server: admin.server });
-
-      if (!data.length) {
-        await sql<AdminInfo>("admins").insert(admin);
-        to_push.push(admin);
-
-        continue;
-      } else if (data.length || data[0].pushed || data[0].alerted_to_delete) {
-        continue;
-      }
-    }
+    to_push.push(...(await handlePush(sql, admins)));
   }
 
   if (to_push.length) {
@@ -208,7 +197,7 @@ async function check(): Promise<AdminInfo[]> {
       .map((adm) => `› [${adm.server}] ${adm.nick} - ${adm.id}`)
       .join("\n");
 
-    await postWebhook("В таблицу добавлены новые админы!", admins);
+    await postWebhook("В таблицу добавлены новые админы!", admins, false);
   }
 
   return to_push;
