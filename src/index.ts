@@ -147,8 +147,8 @@ async function check(): Promise<AdminInfo[]> {
         profile: admin_id,
         id: steam_id,
 
-        pushed: undefined,
-        alerted_to_delete: undefined,
+        pushed: false,
+        alerted_to_delete: false,
       };
 
       if (data.length && data[0].alerted_to_delete) {
@@ -158,11 +158,11 @@ async function check(): Promise<AdminInfo[]> {
 
         continue;
       } else if (data.length) {
-        toAdd["pushed"] = data[0].pushed;
-        toAdd["alerted_to_delete"] = data[0].alerted_to_delete;
+        toAdd.pushed = data[0].pushed;
+        toAdd.alerted_to_delete = data[0].alerted_to_delete;
       } else if (!data.length) {
-        toAdd["pushed"] = false;
-        toAdd["alerted_to_delete"] = false;
+        toAdd.pushed = false;
+        toAdd.alerted_to_delete = false;
       }
 
       server_admins[server_names[server_name]].push(toAdd);
@@ -176,7 +176,8 @@ async function check(): Promise<AdminInfo[]> {
 
   const to_delete: AdminInfo[] = [];
   for (const server of servers_info) {
-    to_delete.push(...(await handleDelete(sql, server)));
+    const data = await handleDelete(sql, server);
+    to_delete.push(...data);
   }
 
   if (to_delete.length) {
@@ -185,11 +186,18 @@ async function check(): Promise<AdminInfo[]> {
       .join("\n");
 
     await postWebhook("Необходимо удаление из таблицы!", admins);
+
+    for (const admin of to_delete) {
+      await sql<AdminInfo>("admins")
+        .delete()
+        .where({ id: admin.id, server: admin.server });
+    }
   }
 
   const to_push: AdminInfo[] = [];
   for (const { admins } of servers_info) {
-    to_push.push(...(await handlePush(sql, admins)));
+    const data = await handlePush(sql, admins);
+    to_push.push(...data);
   }
 
   if (to_push.length) {
@@ -235,14 +243,13 @@ async function push(admins: AdminInfo[]) {
 
       try {
         await sheet.addRow(data);
+        await sql<AdminInfo>("admins")
+          .update({ pushed: true })
+          .where({ id: data["SteamID"], server: data["Сервер"] });
       } catch (error) {
         await sleep(61000);
         await sheet.addRow(data);
       }
-
-      await sql<AdminInfo>("admins")
-        .update({ pushed: true })
-        .where({ id: data["SteamID"], server: data["Сервер"] });
 
       count += 1;
     }
@@ -252,7 +259,7 @@ async function push(admins: AdminInfo[]) {
 }
 
 function sleep(ms: number) {
-  return new Promise((res, rej) => setTimeout(res, ms));
+  return new Promise((res) => setTimeout(res, ms));
 }
 
 function is(arg: unknown): arg is HTMLElement {

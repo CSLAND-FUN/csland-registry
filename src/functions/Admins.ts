@@ -12,15 +12,13 @@ export async function handleDelete(sql: Knex, server: ServerInfo) {
       return adm.id === db_admin.id && adm.server === db_admin.server;
     });
 
-    if (!admin) {
-      if (!db_admin.alerted_to_delete) {
-        await sql<AdminInfo>("admins")
-          .update({ alerted_to_delete: true })
-          .where({ id: db_admin.id, server: db_admin.server });
+    if (!admin && !db_admin.alerted_to_delete) {
+      await sql<AdminInfo>("admins")
+        .update({ alerted_to_delete: true })
+        .where({ id: db_admin.id, server: db_admin.server });
 
-        out.push(db_admin);
-        continue;
-      }
+      out.push(db_admin);
+      continue;
     }
   }
 
@@ -40,7 +38,10 @@ export async function handlePush(sql: Knex, admins: AdminInfo[]) {
       out.push(admin);
 
       continue;
-    } else continue;
+    } else if (data.length && !data[0].pushed) {
+      out.push(admin);
+      continue;
+    }
   }
 
   return out;
